@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-poc-wp-service
+  namespace: wordpress-poc
+spec:
+  ports:
+    - port: 80
+  selector:
+    app: wordpress
+    tier: frontend
+  type: ClusterIP
+  #type: LoadBalancer  para acceso externo sin usar Traefik
+---
+apiVersion: v1
+kind: Secret
+metadata:
+   name: wordpress-admin-secret-config
+   namespace: wordpress-poc
+type: Opaque
+data:
+   password: -------------
+---
+apiVersion: v1
+kind: Secret
+metadata:
+   name: wordpress-user-secret-config
+   namespace: wordpress-poc
+type: Opaque
+data:
+   password: -------------
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wordpress-poc-wp-data-pv
+  namespace: wordpress-poc
+spec:
+  capacity:
+    storage: 20Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /volumenes/wordpress-poc/wp/uploads
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kubwebnodo1
+          - kubwebnodo2
+          - kubwebnodo3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wp-pv-claim
+  namespace: wordpress-poc
+  labels:
+    app: wordpress
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: wordpress-poc-wp-data-pv
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wordpress-opt-scripts
+  namespace: wordpress-poc
+data:
+  wordpress-wp-cli-init.sh: |
+        #!/bin/bash
+
+        ## Script inicialización de sitio
+
+        echo "Iniciando configuración inicial"
+        sudo -E -u www-data wp core install --url=$WORDPRESS_SITE_URL --title=$WORDPRESS_SITE_NAME --admin_user=$WORDPRESS_ADMIN_USER --admin_password=$WORDPRESS_ADMIN_PASSWORD --admin_email=$WORDPRESS_ADMIN_MAIL --skip-email
+
+        echo "Activamos Tema UCA"
+        sudo -E -u www-data wp theme activate theme_main_uca
+
+  wordpress-wp-cli-gestor.sh: |
+        #!/bin/bash
+
+        ## Script creación rol y usuario Gestor
+
+        echo "Creando rol Gestor"
+        sudo -E -u www-data wp role create gestor 'Gestor' --clone=editor
+
+        echo "Modificando permisos rol Gestor"
+        sudo -E -u www-data wp cap add gestor create_users list_users edit_users delete_users promote_users
+        sudo -E -u www-data wp cap add gestor activate_plugins
+        sudo -E -u www-data wp cap add gestor manage_options
+        sudo -E -u www-data wp cap add gestor edit_theme_options
+        sudo -E -u www-data wp cap add gestor wpml_manage_wp_menus_sync
+
+        echo "Creando usuario Gestor"
+        sudo -E -u www-data wp user create $WORDPRESS_USER $WORDPRESS_USER_MAIL --role=gestor --user_pass=$WORDPRESS_PASSWORD
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  namespace: wordpress-poc 
+spec:
+  selector:
+    matchLabels:      
+      tier: frontend
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: wordpress        
+        tier: frontend
+    spec:
+      imagePullSecrets:
+        - name: registry-nexusimgrepo
+      containers:
+      - image: nexusimgrepo.uca.es/uca-wordpress/uca_wordpress:0.1 #wordpress:6.5-apache
+        imagePullPolicy: Always
+        securityContext:
+#            runAsUser: 999
+          allowPrivilegeEscalation: true
+        name: wordpress
+        env:
+          - name: WORDPRESS_SITE_URL
+            value: http://kubwebpool001.uca.es
+          - name: WORDPRESS_SITE_NAME
+            value: Prueba
+          - name: WORDPRESS_ADMIN_USER
+            value: aducawp
+          - name: WORDPRESS_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-admin-secret-config
+                key: password
+          - name: WORDPRESS_ADMIN_MAIL
+            value: web.ai@uca.es
+          - name: WORDPRESS_USER
+            value: gestor
+          - name: WORDPRESS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-user-secret-config
+                key: password
+          - name: WORDPRESS_USER_MAIL
+            value: prueba@prueba.com
+          - name: WORDPRESS_DB_HOST
+            value: wordpress-poc-mysql-service
+          - name: WORDPRESS_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-bd-secret-config
+                key: password
+          - name: WORDPRESS_DB_USER
+            value: wordpress
+        ports:
+          - containerPort: 80
+            name: wordpress
+        volumeMounts:
+          - name: wordpress-persistent-storage
+            mountPath: /var/www/html/wp-content/uploads
+          - name: wordpress-opt-scripts-vol
+            mountPath: /opt/scripts        
+      volumes:
+        - name: wordpress-persistent-storage
+          persistentVolumeClaim:
+            claimName: wp-pv-claim
+        - name: wordpress-opt-scripts-vol
+          configMap:
+            name: wordpress-opt-scripts
