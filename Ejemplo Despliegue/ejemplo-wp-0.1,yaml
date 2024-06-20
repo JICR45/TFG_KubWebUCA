@@ -1,0 +1,289 @@
+apiVersion: v1  
+kind: Service
+metadata:
+  name: ejemplo-wp-service
+  namespace: ejemplo
+spec:
+  ports:
+    - port: 80
+  selector:
+    app: ejemplo
+    tier: frontend
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Secret
+metadata:
+   name: wordpress-admin-secret-config
+   namespace: ejemplo
+type: Opaque
+data:
+   password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+   name: wordpress-user-secret-config
+   namespace: ejemplo
+type: Opaque
+data:
+   password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ejemplo-wp-data-pv
+  namespace: ejemplo
+spec:
+  capacity:
+    storage: 20Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /volumenes/ejemplo/wp/uploads
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kubwebnodo1
+          - kubwebnodo2
+          - kubwebnodo3
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ejemplo-wp-dump-pv
+  namespace: ejemplo
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /volumenes/ejemplo/wp/dump
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kubwebnodo1
+          - kubwebnodo2
+          - kubwebnodo3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wp-data-pvc
+  namespace: ejemplo
+  labels:
+    app: ejemplo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: ejemplo-wp-data-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wp-dump-pvc
+  namespace: ejemplo
+  labels:
+    app: ejemplo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 5Gi
+  volumeName: ejemplo-wp-dump-pv
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wordpress-opt-scripts
+  namespace: ejemplo
+data:
+  wordpress-wp-cli-init.sh: |
+        #!/bin/bash
+
+        ## Script inicialización de sitio
+
+        echo "Iniciando configuración inicial"
+        sudo -E -u www-data wp core install --url=$WORDPRESS_SITE_URL --title=$WORDPRESS_SITE_NAME --admin_user=$WORDPRESS_ADMIN_USER --admin_password=$WORDPRESS_ADMIN_PASSWORD --admin_email=$WORDPRESS_ADMIN_MAIL --skip-email
+
+        echo "Activamos Tema UCA"
+        sudo -E -u www-data wp theme activate theme_main_uca
+
+        echo "Creamos configuraciones personalizadas UCA"
+        sudo -E -u www-data wp option add "theme_uca_settings" --format=json < /opt/scripts/theme_uca_settings_default.json
+
+  wordpress-wp-cli-gestor.sh: |
+        #!/bin/bash
+
+        ## Script creación rol y usuario Gestor
+
+        echo "Creando rol Gestor"
+        sudo -E -u www-data wp role create gestor 'Gestor' --clone=editor
+
+        echo "Modificando permisos rol Gestor"
+        sudo -E -u www-data wp cap add gestor create_users list_users edit_users delete_users promote_users
+        sudo -E -u www-data wp cap add gestor activate_plugins
+        sudo -E -u www-data wp cap add gestor manage_options
+        sudo -E -u www-data wp cap add gestor edit_theme_options
+        sudo -E -u www-data wp cap add gestor wpml_manage_wp_menus_sync
+
+        echo "Creando usuario Gestor"
+        sudo -E -u www-data wp user create $WORDPRESS_USER $WORDPRESS_USER_MAIL --role=gestor --user_pass=$WORDPRESS_PASSWORD
+  
+  theme_uca_settings_default.json: |
+      {"theme_uca_fTituloLinea1":"La web de XX",
+      "theme_uca_fTituloLinea2":"esta es la web de XX",
+      "theme_uca_fDescripcion":"",
+      "theme_uca_fPresentacion":"uca_general",
+      "theme_uca_fTipoEntidad":"uca_ent_centro",
+      "theme_uca_fCategoriaEnt":"uca_cat_default",
+      "theme_uca_fPropiedadAnalytics":"UA-80714150-10",
+      "theme_uca_fBuscadorAvanzado":"1",
+      "theme_uca_fSavedData":"YES",
+      "theme_uca_fCodPersonal":"",
+      "theme_uca_fCodPersonal_aux":"",
+      "theme_uca_fPersonalDefaultSort":"name::Nombre",
+      "theme_uca_fMenuResponsables":"1",
+      "theme_uca_fMenuPersonal":"1",
+      "theme_uca_fMail":"",
+      "theme_uca_fTlfno":"555 444 333",
+      "theme_uca_fFax":"555 444 333",
+      "theme_uca_fPostal":"Avda. Universidad de Cádiz, nº 10, 11519 Campus Universitario de Puerto Real",
+      "theme_uca_fContactForm":"",
+      "theme_uca_fMapaLatitud":"36.52988",
+      "theme_uca_fMapaLongitud":"-6.21177",
+      "theme_uca_fFacebook":"https:\/\/www.facebook.com\/universidaddecadiz",
+      "theme_uca_fTwitter":"https:\/\/twitter.com\/univcadiz",
+      "theme_uca_fRss":"https:\/\/www.uca.es\/es\/rss",
+      "theme_uca_fYoutube":"https:\/\/www.youtube.com\/videosUCA",
+      "theme_uca_fInstagram":"https:\/\/www.instagram.com\/univcadiz\/",
+      "theme_uca_fFlickr":"https:\/\/www.flickr.com\/photos\/147802205@N03\/albums",
+      "theme_uca_fVk":""
+      }
+
+  backup_uploads.sh: |
+        #!/bin/bash
+        set -e
+
+        dt=$(date '+%d/%m/%Y %H:%M:%S');
+        fileDt=$(date '+%Y%m%d%H%M%S');
+        backUpFileName="ejemplo-UPLOADS-WP-$fileDt.tgz"
+        backUpFilePath="/dump/$backUpFileName"
+
+        echo "$dt - Comienza copia Uploads ejemplo en fichero: $backUpFilePath";
+        echo "$dt - Ejecutando tar > $backUpFilePath"
+
+        cd /var/www/html/wp-content/uploads/
+
+        tar cvzf $backUpFilePath .
+
+        if [ $? -ne 0 ]; then
+          rm $backUpFilePath
+          echo "No se puede realizar copia."
+          exit 1
+        fi
+
+        echo "$dt - Copia Uploads de ejemplo completada en fichero: $backUpFilePath"; 
+          
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ejemplo-wordpress
+  namespace: ejemplo 
+spec:
+  selector:
+    matchLabels:      
+      tier: frontend
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: ejemplo        
+        tier: frontend
+    spec:
+      imagePullSecrets:
+        - name: registry-nexusimgrepo
+      containers:
+      - image: nexusimgrepo.uca.es/uca-wordpress/uca_wordpress:0.1 #wordpress:6.5-apache
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: true
+        name: wordpress
+        env:
+          - name: WORDPRESS_SITE_URL
+            value: ejemplo.uca.es
+            #value: kubwebpool001.uca.es
+          - name: WORDPRESS_SITE_NAME
+            value: Prueba
+          - name: WORDPRESS_ADMIN_USER
+            value: aducawp
+          - name: WORDPRESS_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-admin-secret-config
+                key: password
+          - name: WORDPRESS_ADMIN_MAIL
+            value: web.ai@uca.es
+          - name: WORDPRESS_USER
+            value: gestor
+          - name: WORDPRESS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: wordpress-user-secret-config
+                key: password
+          - name: WORDPRESS_USER_MAIL
+            value: prueba@prueba.com
+          - name: WORDPRESS_DB_HOST
+            value: ejemplo-mysql-service
+          - name: WORDPRESS_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-bd-secret-config
+                key: password
+          - name: WORDPRESS_DB_USER
+            value: wordpress
+        ports:
+          - containerPort: 80
+            name: wordpress
+        volumeMounts:
+          - name: wordpress-persistent-storage
+            mountPath: /var/www/html/wp-content/uploads
+          - name: wordpress-opt-scripts-vol
+            mountPath: /opt/scripts 
+          - name: volumen-wordpress-dump
+            mountPath: /dump
+                     
+      volumes:
+        - name: wordpress-persistent-storage
+          persistentVolumeClaim:
+            claimName: wp-data-pvc
+        - name: wordpress-opt-scripts-vol
+          configMap:
+            name: wordpress-opt-scripts
+        - name: volumen-wordpress-dump
+          persistentVolumeClaim:
+            claimName: wp-dump-pvc
+  
