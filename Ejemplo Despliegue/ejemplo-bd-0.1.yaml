@@ -1,0 +1,208 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ejemplo
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ejemplo-bd-data-pv
+  namespace: ejemplo
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /volumenes/ejemplo/bd/data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kubwebnodo1
+          - kubwebnodo2
+          - kubwebnodo3
+---   
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ejemplo-bd-dump-pv
+  namespace: ejemplo
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /volumenes/ejemplo/bd/dump
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kubwebnodo1
+          - kubwebnodo2
+          - kubwebnodo3
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: bd-data-pvc
+  namespace: ejemplo  
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: ejemplo-bd-data-pv
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: bd-dump-pvc
+  namespace: ejemplo  
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 5Gi
+  volumeName: ejemplo-bd-dump-pv  
+---
+apiVersion: v1
+kind: Secret
+metadata:
+   name: mysql-bd-secret-config
+   namespace: ejemplo
+type: Opaque
+data:
+   password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-opt-scripts
+  namespace: ejemplo
+data:
+  check_mysql.sh: |
+        #!/bin/bash
+
+        ## Script comprobación BD Wordpress está levantada
+
+        mysql -u$MYSQL_USER -p$MYSQL_PASSWORD -e "USE $MYSQL_DATABASE;"
+    
+  backup_database.sh: |
+        #!/bin/bash
+        set -e
+
+        dt=$(date '+%d/%m/%Y %H:%M:%S');
+        fileDt=$(date '+%Y%m%d%H%M%S');
+        backUpFileName="ejemplo-$MYSQL_DATABASE-DB-$fileDt.gz"
+        backUpFilePath="/dump/$backUpFileName"
+
+        echo "$dt - Comienza copia BD ejemplo en fichero: $backUpFilePath";
+        echo "$dt - Ejecutando mysqldump | gzip > $backUpFilePath"
+
+        mysqldump -uroot -p$MYSQL_ROOT_PASSWORD $MYSQL_DATABASE | gzip > $backUpFilePath
+
+        if [ $? -ne 0 ]; then
+          rm $backUpFilePath
+          echo "No se puede realizar copia. Compruebe los parámetros de conexión a la BD"
+          exit 1
+        fi
+
+        echo "$dt - Copia BD de ejemplo completada en fichero: $backUpFilePath"; 
+          
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ejemplo-bd
+  namespace: ejemplo  
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      tier: mysql
+  template:
+    metadata:
+      labels:
+        app: ejemplo
+        tier: mysql 
+    spec:
+      imagePullSecrets:
+        - name: registry-nexusimgrepo
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: true
+          ports:
+            - containerPort: 3306 
+          env:
+            - name: MYSQL_USER
+              value: wordpress
+            - name: MYSQL_DATABASE
+              value: wordpress
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-bd-secret-config
+                  key: password
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-bd-secret-config
+                  key: password                     
+          volumeMounts:             
+            - mountPath: /var/lib/mysql
+              name: mysql-persistent-storage             
+            - mountPath: /dump
+              name: volumen-mysql-dump
+            - mountPath: /opt/scripts 
+              name: mysql-opt-scripts-vol
+          readinessProbe:
+            exec:              
+              command: ["/bin/bash", "/opt/scripts/check_mysql.sh"]
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3              
+      volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: bd-data-pvc
+        - name: volumen-mysql-dump
+          persistentVolumeClaim:
+            claimName: bd-dump-pvc
+        - name: mysql-opt-scripts-vol
+          configMap:
+            name: mysql-opt-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ejemplo-mysql-service
+  namespace: ejemplo
+spec:
+  ports:
+  - port: 3306    
+  selector:
+    app: ejemplo
+    tier: mysql
+  clusterIP: None 
