@@ -1,0 +1,17 @@
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: ejemplo-ingress
+    namespace: ejemplo
+  spec:   
+    rules:
+      - host: ejemplo.uca.es
+        http:
+          paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ejemplo-wp-service 
+                port:
+                  number: 80
