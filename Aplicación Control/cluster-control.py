@@ -7,7 +7,7 @@ Cluster Control Script for Kubernetes
 Este script proporciona una serie de comandos para gestionar y controlar el clúster de Kubernetes.
 Permite realizar operaciones como desplegar sitios, reiniciar contenedores, mostrar logs, y manejar backups, entre otros.
 
-© 2024 - José Ignacio Cubiella Rodríguez 
+© 2024 - JICR 
 
 """
 
