@@ -165,7 +165,7 @@ def crearSecretoRepo(nombreSitio):
     creadoSecreto = False
     try:
         # Comando kubectl para crear el secreto en el despliegue
-        output = subprocess.check_output(["kubectl", "create", "secret", "docker-registry", "registry-nexusimgrepo", "--docker-server=nexusimgrepo.uca.es", "--docker-username=kubweb", "--docker-password=[NbcKw6a13", "--docker-email=kubweb@uca.es", "-n", nombreSitio], stderr=subprocess.STDOUT)
+        output = subprocess.check_output(["kubectl", "create", "secret", "docker-registry", "registry-nexusimgrepo", "--docker-server=nexusimgrepo.uca.es", "--docker-username=user", "--docker-password=password", "--docker-email=kubweb@uca.es", "-n", nombreSitio], stderr=subprocess.STDOUT)
         
         # Verifica la salida para determinar si el secreto fue creado
         for line in output.splitlines():
